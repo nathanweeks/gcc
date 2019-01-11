@@ -1795,6 +1795,12 @@ match
 gfc_match_critical (void)
 {
   gfc_st_label *label = NULL;
+  match m;
+  gfc_expr *tmp, *stat, *errmsg;
+  bool saw_stat, saw_errmsg;
+
+  tmp = stat = errmsg = NULL;
+  saw_stat = saw_errmsg = false;
 
   if (gfc_match_label () == MATCH_ERROR)
     return MATCH_ERROR;
@@ -1805,11 +1811,61 @@ gfc_match_critical (void)
   if (gfc_match_st_label (&label) == MATCH_ERROR)
     return MATCH_ERROR;
 
-  if (gfc_match_eos () != MATCH_YES)
+  if (gfc_match_eos () == MATCH_YES)
+    goto done;
+
+  if (gfc_match_char ('(') != MATCH_YES)
+    goto syntax;
+
+  for (;;)
     {
-      gfc_syntax_error (ST_CRITICAL);
-      return MATCH_ERROR;
+      m = gfc_match (" stat = %v", &tmp);
+      if (m == MATCH_ERROR)
+	goto syntax;
+      if (m == MATCH_YES)
+	{
+	  if (saw_stat)
+	    {
+	      gfc_error ("Redundant STAT tag found at %L", &tmp->where);
+	      goto cleanup;
+	    }
+	  stat = tmp;
+	  saw_stat = true;
+
+	  if (gfc_match_char (',') == MATCH_YES)
+	    continue;
+
+	  tmp = NULL;
+	  break;
+	}
+
+      m = gfc_match (" errmsg = %v", &tmp);
+      if (m == MATCH_ERROR)
+	goto syntax;
+      if (m == MATCH_YES)
+	{
+	  if (saw_errmsg)
+	    {
+	      gfc_error ("Redundant ERRMSG tag found at %L", &tmp->where);
+	      goto cleanup;
+	    }
+	  errmsg = tmp;
+	  saw_errmsg = true;
+
+	  if (gfc_match_char (',') == MATCH_YES)
+	    continue;
+
+	  tmp = NULL;
+	  break;
+	}
+
+	break;
     }
+
+  if (gfc_match (" )%t") != MATCH_YES)
+    goto syntax;
+
+done:
 
   if (gfc_pure (NULL))
     {
@@ -1843,12 +1899,27 @@ gfc_match_critical (void)
     }
 
   new_st.op = EXEC_CRITICAL;
+  new_st.expr1 = stat;
+  new_st.expr2 = errmsg;
 
   if (label != NULL
       && !gfc_reference_st_label (label, ST_LABEL_TARGET))
-    return MATCH_ERROR;
+    goto cleanup;
 
   return MATCH_YES;
+
+syntax:
+  gfc_syntax_error (ST_CRITICAL);
+
+cleanup:
+  if (stat != tmp)
+    gfc_free_expr (stat);
+  if (errmsg != tmp)
+    gfc_free_expr (errmsg);
+
+  gfc_free_expr (tmp);
+
+  return MATCH_ERROR;
 }
 
 
@@ -3395,7 +3466,11 @@ match
 gfc_match_form_team (void)
 {
   match m;
-  gfc_expr *teamid,*team;
+  gfc_expr *teamid, *team, *new_index, *stat, *errmsg, *tmp;
+  bool saw_new_index, saw_stat, saw_errmsg;
+
+  team = new_index = stat = errmsg = tmp = NULL;
+  saw_new_index = saw_stat = saw_errmsg = false;
 
   if (!gfc_notify_std (GFC_STD_F2018, "FORM TEAM statement at %C"))
     return MATCH_ERROR;
@@ -3413,17 +3488,116 @@ gfc_match_form_team (void)
   if (gfc_match ("%e", &team) != MATCH_YES)
     goto syntax;
 
-  m = gfc_match_char (')');
-  if (m == MATCH_NO)
+  m = gfc_match_char (',');
+  if (m == MATCH_ERROR)
     goto syntax;
+  if (m == MATCH_NO)
+    {
+      m = gfc_match_char (')');
+      if (m == MATCH_YES)
+	goto done;
+      goto syntax;
+    }
+
+  for (;;)
+    {
+      m = gfc_match (" stat = %v", &tmp);
+      if (m == MATCH_ERROR)
+	goto syntax;
+      if (m == MATCH_YES)
+	{
+	  if (saw_stat)
+	    {
+	      gfc_error ("Redundant STAT tag found at %L", &tmp->where);
+	      goto cleanup;
+	    }
+	  stat = tmp;
+	  saw_stat = true;
+
+	  m = gfc_match_char (',');
+	  if (m == MATCH_YES)
+	    continue;
+
+	  tmp = NULL;
+	  break;
+	}
+
+      m = gfc_match (" errmsg = %v", &tmp);
+      if (m == MATCH_ERROR)
+	goto syntax;
+      if (m == MATCH_YES)
+	{
+	  if (saw_errmsg)
+	    {
+	      gfc_error ("Redundant ERRMSG tag found at %L", &tmp->where);
+	      goto cleanup;
+	    }
+	  errmsg = tmp;
+	  saw_errmsg = true;
+
+	  m = gfc_match_char (',');
+	  if (m == MATCH_YES)
+	    continue;
+
+	  tmp = NULL;
+	  break;
+	}
+
+      m = gfc_match (" new_index = %e", &tmp);
+      if (m == MATCH_ERROR)
+	goto syntax;
+      if (m == MATCH_YES)
+	{
+	  if (saw_new_index)
+	    {
+	      gfc_error ("Redundant NEW_INDEX tag found at %L",
+			 &tmp->where);
+	      goto cleanup;
+	    }
+	  new_index = tmp;
+	  saw_new_index = true;
+
+	  m = gfc_match_char (',');
+	  if (m == MATCH_YES)
+	    continue;
+
+	  tmp = NULL;
+	  break;
+	}
+
+      break;
+    }
+
+  if (m == MATCH_ERROR)
+    goto syntax;
+
+  if (gfc_match (" )%t") != MATCH_YES)
+    goto syntax;
+
+done:
 
   new_st.expr1 = teamid;
   new_st.expr2 = team;
+  new_st.expr3 = new_index;
+  new_st.expr4 = stat;
+  new_st.expr5 = errmsg;
 
   return MATCH_YES;
 
 syntax:
   gfc_syntax_error (ST_FORM_TEAM);
+
+cleanup:
+  if (new_index != tmp)
+    gfc_free_expr (new_index);
+  if (stat != tmp)
+    gfc_free_expr (stat);
+  if (errmsg != tmp)
+    gfc_free_expr (errmsg);
+
+  gfc_free_expr (tmp);
+  gfc_free_expr (team);
+  gfc_free_expr (teamid);
 
   return MATCH_ERROR;
 }
@@ -3434,7 +3608,11 @@ match
 gfc_match_change_team (void)
 {
   match m;
-  gfc_expr *team;
+  gfc_expr *team, *stat, *errmsg, *tmp;
+  bool saw_stat, saw_errmsg;
+
+  tmp = team = stat = errmsg = NULL;
+  saw_stat = saw_errmsg = false;
 
   if (!gfc_notify_std (GFC_STD_F2018, "CHANGE TEAM statement at %C"))
     return MATCH_ERROR;
@@ -3447,16 +3625,84 @@ gfc_match_change_team (void)
   if (gfc_match ("%e", &team) != MATCH_YES)
     goto syntax;
 
-  m = gfc_match_char (')');
+  m = gfc_match_char (',');
+  if (m == MATCH_ERROR)
+    goto syntax;
   if (m == MATCH_NO)
+    {
+      m = gfc_match_char (')');
+      if (m == MATCH_YES)
+	goto done;
+      goto syntax;
+    }
+
+  for (;;)
+    {
+      m = gfc_match (" stat = %v", &tmp);
+      if (m == MATCH_ERROR)
+	goto syntax;
+      if (m == MATCH_YES)
+	{
+	  if (saw_stat)
+	    {
+	      gfc_error ("Redundant STAT tag found at %L", &tmp->where);
+	      goto cleanup;
+	    }
+	  stat = tmp;
+	  saw_stat = true;
+
+	  if (gfc_match_char (',') == MATCH_YES)
+	    continue;
+
+	  tmp = NULL;
+	  break;
+	}
+
+      m = gfc_match (" errmsg = %v", &tmp);
+      if (m == MATCH_ERROR)
+	goto syntax;
+      if (m == MATCH_YES)
+	{
+	  if (saw_errmsg)
+	    {
+	      gfc_error ("Redundant ERRMSG tag found at %L", &tmp->where);
+	      goto cleanup;
+	    }
+	  errmsg = tmp;
+	  saw_errmsg = true;
+
+	  if (gfc_match_char (',') == MATCH_YES)
+	    continue;
+
+	  tmp = NULL;
+	  break;
+	}
+
+	break;
+    }
+
+  if (gfc_match (" )%t") != MATCH_YES)
     goto syntax;
 
+done:
+
   new_st.expr1 = team;
+  new_st.expr2 = stat;
+  new_st.expr3 = errmsg;
 
   return MATCH_YES;
 
 syntax:
   gfc_syntax_error (ST_CHANGE_TEAM);
+
+cleanup:
+  if (stat != tmp)
+    gfc_free_expr (stat);
+  if (errmsg != tmp)
+    gfc_free_expr (errmsg);
+
+  gfc_free_expr (tmp);
+  gfc_free_expr (team);
 
   return MATCH_ERROR;
 }
@@ -3466,18 +3712,88 @@ syntax:
 match
 gfc_match_end_team (void)
 {
+  match m;
+  gfc_expr *tmp, *stat, *errmsg;
+  bool saw_stat, saw_errmsg;
+
+  tmp = stat = errmsg = NULL;
+  saw_stat = saw_errmsg = false;
+
   if (!gfc_notify_std (GFC_STD_F2018, "END TEAM statement at %C"))
     return MATCH_ERROR;
 
-  if (gfc_match_char ('(') == MATCH_YES)
+  if (gfc_match_eos () == MATCH_YES)
+    goto done;
+
+  if (gfc_match_char ('(') != MATCH_YES)
     goto syntax;
 
+  for (;;)
+    {
+      m = gfc_match (" stat = %v", &tmp);
+      if (m == MATCH_ERROR)
+	goto syntax;
+      if (m == MATCH_YES)
+	{
+	  if (saw_stat)
+	    {
+	      gfc_error ("Redundant STAT tag found at %L", &tmp->where);
+	      goto cleanup;
+	    }
+	  stat = tmp;
+	  saw_stat = true;
+
+	  if (gfc_match_char (',') == MATCH_YES)
+	    continue;
+
+	  tmp = NULL;
+	  break;
+	}
+
+      m = gfc_match (" errmsg = %v", &tmp);
+      if (m == MATCH_ERROR)
+	goto syntax;
+      if (m == MATCH_YES)
+	{
+	  if (saw_errmsg)
+	    {
+	      gfc_error ("Redundant ERRMSG tag found at %L", &tmp->where);
+	      goto cleanup;
+	    }
+	  errmsg = tmp;
+	  saw_errmsg = true;
+
+	  if (gfc_match_char (',') == MATCH_YES)
+	    continue;
+
+	  tmp = NULL;
+	  break;
+	}
+
+	break;
+    }
+
+  if (gfc_match (" )%t") != MATCH_YES)
+    goto syntax;
+
+done:
+
   new_st.op = EXEC_END_TEAM;
+  new_st.expr1 = stat;
+  new_st.expr2 = errmsg;
 
   return MATCH_YES;
 
 syntax:
   gfc_syntax_error (ST_END_TEAM);
+
+cleanup:
+  if (stat != tmp)
+    gfc_free_expr (stat);
+  if (errmsg != tmp)
+    gfc_free_expr (errmsg);
+
+  gfc_free_expr (tmp);
 
   return MATCH_ERROR;
 }
@@ -3488,7 +3804,11 @@ match
 gfc_match_sync_team (void)
 {
   match m;
-  gfc_expr *team;
+  gfc_expr *team, *stat, *errmsg, *tmp;
+  bool saw_stat, saw_errmsg;
+
+  tmp = team = stat = errmsg = NULL;
+  saw_stat = saw_errmsg = false;
 
   if (!gfc_notify_std (GFC_STD_F2018, "SYNC TEAM statement at %C"))
     return MATCH_ERROR;
@@ -3501,16 +3821,84 @@ gfc_match_sync_team (void)
   if (gfc_match ("%e", &team) != MATCH_YES)
     goto syntax;
 
-  m = gfc_match_char (')');
+  m = gfc_match_char (',');
+  if (m == MATCH_ERROR)
+    goto syntax;
   if (m == MATCH_NO)
+    {
+      m = gfc_match_char (')');
+      if (m == MATCH_YES)
+	goto done;
+      goto syntax;
+    }
+
+  for (;;)
+    {
+      m = gfc_match (" stat = %v", &tmp);
+      if (m == MATCH_ERROR)
+	goto syntax;
+      if (m == MATCH_YES)
+	{
+	  if (saw_stat)
+	    {
+	      gfc_error ("Redundant STAT tag found at %L", &tmp->where);
+	      goto cleanup;
+	    }
+	  stat = tmp;
+	  saw_stat = true;
+
+	  if (gfc_match_char (',') == MATCH_YES)
+	    continue;
+
+	  tmp = NULL;
+	  break;
+	}
+
+      m = gfc_match (" errmsg = %v", &tmp);
+      if (m == MATCH_ERROR)
+	goto syntax;
+      if (m == MATCH_YES)
+	{
+	  if (saw_errmsg)
+	    {
+	      gfc_error ("Redundant ERRMSG tag found at %L", &tmp->where);
+	      goto cleanup;
+	    }
+	  errmsg = tmp;
+	  saw_errmsg = true;
+
+	  if (gfc_match_char (',') == MATCH_YES)
+	    continue;
+
+	  tmp = NULL;
+	  break;
+	}
+
+	break;
+    }
+
+  if (gfc_match (" )%t") != MATCH_YES)
     goto syntax;
 
+done:
+
   new_st.expr1 = team;
+  new_st.expr2 = stat;
+  new_st.expr3 = errmsg;
 
   return MATCH_YES;
 
 syntax:
   gfc_syntax_error (ST_SYNC_TEAM);
+
+cleanup:
+  if (stat != tmp)
+    gfc_free_expr (stat);
+  if (errmsg != tmp)
+    gfc_free_expr (errmsg);
+
+  gfc_free_expr (tmp);
+  gfc_free_expr (team);
 
   return MATCH_ERROR;
 }
