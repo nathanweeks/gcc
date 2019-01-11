@@ -4028,19 +4028,20 @@ gfc_build_builtin_function_decls (void)
 
       gfor_fndecl_caf_form_team
 	= gfc_build_library_function_decl_with_spec (
-	    get_identifier (PREFIX("caf_form_team")), ". . W . ",
-	    void_type_node, 3, integer_type_node, ppvoid_type_node,
-	    integer_type_node);
+	    get_identifier (PREFIX("caf_form_team")), ". . W R w w . ",
+	    void_type_node, 6, integer_type_node, ppvoid_type_node,
+	    integer_type_node, pint_type, pchar_type_node, size_type_node);
 
       gfor_fndecl_caf_change_team
 	= gfc_build_library_function_decl_with_spec (
-	    get_identifier (PREFIX("caf_change_team")), ". w . ",
-	    void_type_node, 2, ppvoid_type_node,
-	    integer_type_node);
+	    get_identifier (PREFIX("caf_change_team")), ". w w w . ",
+	    void_type_node, 4, ppvoid_type_node, pint_type, pchar_type_node,
+	    size_type_node);
 
       gfor_fndecl_caf_end_team
-	= gfc_build_library_function_decl (
-	    get_identifier (PREFIX("caf_end_team")), void_type_node, 0);
+	= gfc_build_library_function_decl_with_spec (
+	    get_identifier (PREFIX("caf_end_team")), ". w w . ", void_type_node, 3,
+	    pint_type, pchar_type_node, size_type_node);
 
       gfor_fndecl_caf_get_team
 	= gfc_build_library_function_decl (
@@ -4049,9 +4050,9 @@ gfc_build_builtin_function_decls (void)
 
       gfor_fndecl_caf_sync_team
 	= gfc_build_library_function_decl_with_spec (
-	    get_identifier (PREFIX("caf_sync_team")), ". r . ",
-	    void_type_node, 2, ppvoid_type_node,
-	    integer_type_node);
+	    get_identifier (PREFIX("caf_sync_team")), ". r w w . ",
+	    void_type_node, 4, ppvoid_type_node, pint_type, pchar_type_node,
+	    size_type_node);
 
       gfor_fndecl_caf_team_number
       	= gfc_build_library_function_decl_with_spec (
