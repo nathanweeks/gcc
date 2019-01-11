@@ -707,19 +707,82 @@ gfc_trans_form_team (gfc_code *code)
 {
   if (flag_coarray == GFC_FCOARRAY_LIB)
     {
-      gfc_se argse;
-      tree team_id,team_type;
-      gfc_init_se (&argse, NULL);
-      gfc_conv_expr_val (&argse, code->expr1);
-      team_id = fold_convert (integer_type_node, argse.expr);
-      gfc_init_se (&argse, NULL);
-      gfc_conv_expr_val (&argse, code->expr2);
-      team_type = gfc_build_addr_expr (ppvoid_type_node, argse.expr);
+      gfc_se se;
+      gfc_se argse1, argse2, argse, new_indexse;
+      tree team_id, team_type, new_index, stat, errmsg, errmsg_len, tmp;
+      tree stat2 = NULL_TREE;
 
-      return build_call_expr_loc (input_location,
-				  gfor_fndecl_caf_form_team, 3,
-				  team_id, team_type,
-				  build_int_cst (integer_type_node, 0));
+      gfc_init_se (&se, NULL);
+      gfc_init_se (&argse1, NULL);
+      gfc_init_se (&argse2, NULL);
+      gfc_start_block (&se.pre);
+
+      gfc_conv_expr_val (&argse1, code->expr1);
+      gfc_conv_expr_val (&argse2, code->expr2);
+      team_id = fold_convert (integer_type_node, argse1.expr);
+      team_type = gfc_build_addr_expr (ppvoid_type_node, argse2.expr);
+
+      gfc_add_block_to_block (&se.pre, &argse1.pre);
+      gfc_add_block_to_block (&se.pre, &argse2.pre);
+
+      /* NEW_INDEX=.  */
+      if (code->expr3)
+	{
+	  gfc_init_se (&new_indexse, NULL);
+	  gfc_conv_expr_val (&new_indexse, code->expr3);
+	  new_index = new_indexse.expr;
+	}
+      else
+	new_index = null_pointer_node;
+
+      /* STAT=.  */
+      if (code->expr4)
+	{
+	  gcc_assert (code->expr4->expr_type == EXPR_VARIABLE);
+	  gfc_init_se (&argse, NULL);
+	  gfc_conv_expr_val (&argse, code->expr4);
+	  stat = argse.expr;
+	}
+      else
+	stat = null_pointer_node;
+
+      /* ERRMSG= only makes sense with STAT=.  */
+      if (code->expr4 && code->expr5)
+	{
+	  gfc_init_se (&argse, NULL);
+	  argse.want_pointer = 1;
+	  gfc_conv_expr (&argse, code->expr5);
+	  gfc_add_block_to_block (&se.pre, &argse.pre);
+	  errmsg = argse.expr;
+	  errmsg_len = fold_convert (size_type_node, argse.string_length);
+	}
+      else
+	{
+	  errmsg = null_pointer_node;
+	  errmsg_len = build_zero_cst (size_type_node);
+	}
+
+      if (stat != null_pointer_node && TREE_TYPE (stat) != integer_type_node)
+	{
+	  stat2 = stat;
+	  stat = gfc_create_var (integer_type_node, "stat");
+	}
+
+      tmp = build_call_expr_loc (input_location,
+				 gfor_fndecl_caf_form_team, 6,
+				 team_id, team_type, new_index,
+				 stat != null_pointer_node
+				 ? gfc_build_addr_expr (NULL, stat) : stat,
+				 errmsg, errmsg_len);
+      gfc_add_expr_to_block (&se.pre, tmp);
+      gfc_add_block_to_block (&se.pre, &argse1.post);
+      gfc_add_block_to_block (&se.pre, &argse2.post);
+      if (new_index != null_pointer_node)
+	gfc_add_block_to_block (&se.pre, &new_indexse.post);
+      if (stat2 != NULL_TREE)
+	gfc_add_modify (&se.pre, stat2,
+			fold_convert (TREE_TYPE (stat2), stat));
+      return gfc_finish_block (&se.pre);
     }
   else
     {
@@ -737,16 +800,63 @@ gfc_trans_change_team (gfc_code *code)
 {
   if (flag_coarray == GFC_FCOARRAY_LIB)
     {
-      gfc_se argse;
-      tree team_type;
+      gfc_se argse, se, team_typese;
+      tree team_type, stat, errmsg, errmsg_len, tmp, stat2 = NULL_TREE;
 
+      gfc_init_se (&se, NULL);
       gfc_init_se (&argse, NULL);
-      gfc_conv_expr_val (&argse, code->expr1);
-      team_type = gfc_build_addr_expr (ppvoid_type_node, argse.expr);
+      gfc_init_se (&team_typese, NULL);
+      gfc_start_block (&se.pre);
 
-      return build_call_expr_loc (input_location,
-				  gfor_fndecl_caf_change_team, 2, team_type,
-				  build_int_cst (integer_type_node, 0));
+      gfc_conv_expr_val (&team_typese, code->expr1);
+      team_type = gfc_build_addr_expr (ppvoid_type_node, team_typese.expr);
+
+      gfc_add_block_to_block (&se.pre, &team_typese.pre);
+
+      /* STAT=.  */
+      if (code->expr2)
+	{
+	  gcc_assert (code->expr2->expr_type == EXPR_VARIABLE);
+	  gfc_init_se (&argse, NULL);
+	  gfc_conv_expr_val (&argse, code->expr2);
+	  stat = argse.expr;
+	}
+      else
+	stat = null_pointer_node;
+
+      /* ERRMSG= only makes sense with STAT=.  */
+      if (code->expr2 && code->expr3)
+	{
+	  gfc_init_se (&argse, NULL);
+	  argse.want_pointer = 1;
+	  gfc_conv_expr (&argse, code->expr3);
+	  gfc_add_block_to_block (&se.pre, &argse.pre);
+	  errmsg = argse.expr;
+	  errmsg_len = fold_convert (size_type_node, argse.string_length);
+	}
+      else
+	{
+	  errmsg = null_pointer_node;
+	  errmsg_len = build_zero_cst (size_type_node);
+	}
+
+      if (stat != null_pointer_node && TREE_TYPE (stat) != integer_type_node)
+	{
+	  stat2 = stat;
+	  stat = gfc_create_var (integer_type_node, "stat");
+	}
+
+      tmp = build_call_expr_loc (input_location,
+				 gfor_fndecl_caf_change_team, 4, team_type,
+				 stat != null_pointer_node
+				 ? gfc_build_addr_expr (NULL, stat) : stat,
+				 errmsg, errmsg_len);
+      gfc_add_expr_to_block (&se.pre, tmp);
+      gfc_add_block_to_block (&se.pre, &team_typese.post);
+      if (stat2 != NULL_TREE)
+	gfc_add_modify (&se.pre, stat2,
+			fold_convert (TREE_TYPE (stat2), stat));
+      return gfc_finish_block (&se.pre);
     }
   else
     {
@@ -760,13 +870,58 @@ gfc_trans_change_team (gfc_code *code)
 /* Translate the END TEAM statement.  */
 
 tree
-gfc_trans_end_team (gfc_code *code ATTRIBUTE_UNUSED)
+gfc_trans_end_team (gfc_code *code)
 {
   if (flag_coarray == GFC_FCOARRAY_LIB)
     {
-      return build_call_expr_loc (input_location,
-				  gfor_fndecl_caf_end_team, 1,
-				  build_int_cst (pchar_type_node, 0));
+      gfc_se argse, se;
+      tree stat, errmsg, errmsg_len, tmp, stat2 = NULL_TREE;
+
+      gfc_init_se (&se, NULL);
+      gfc_init_se (&argse, NULL);
+      gfc_start_block (&se.pre);
+
+      if (code->expr1)
+	{
+	  gcc_assert (code->expr1->expr_type == EXPR_VARIABLE);
+	  gfc_init_se (&argse, NULL);
+	  gfc_conv_expr_val (&argse, code->expr1);
+	  stat = argse.expr;
+	}
+      else
+	stat = null_pointer_node;
+
+      if (code->expr2)
+	{
+	  gfc_init_se (&argse, NULL);
+	  argse.want_pointer = 1;
+	  gfc_conv_expr (&argse, code->expr2);
+	  gfc_add_block_to_block (&se.pre, &argse.pre);
+	  errmsg = argse.expr;
+	  errmsg_len = fold_convert (size_type_node, argse.string_length);
+	}
+      else
+	{
+	  errmsg = null_pointer_node;
+	  errmsg_len = build_zero_cst (size_type_node);
+	}
+
+      if (stat != null_pointer_node && TREE_TYPE (stat) != integer_type_node)
+	{
+	  stat2 = stat;
+	  stat = gfc_create_var (integer_type_node, "stat");
+	}
+
+      tmp = build_call_expr_loc (input_location,
+				 gfor_fndecl_caf_end_team, 3,
+				 stat != null_pointer_node
+				 ? gfc_build_addr_expr (NULL, stat) : stat,
+				 errmsg, errmsg_len);
+      gfc_add_expr_to_block (&se.pre, tmp);
+      if (stat2 != NULL_TREE)
+	gfc_add_modify (&se.pre, stat2,
+			fold_convert (TREE_TYPE (stat2), stat));
+      return gfc_finish_block (&se.pre);
     }
   else
     {
@@ -784,17 +939,63 @@ gfc_trans_sync_team (gfc_code *code)
 {
   if (flag_coarray == GFC_FCOARRAY_LIB)
     {
-      gfc_se argse;
-      tree team_type;
+      gfc_se argse, se, team_typese;
+      tree team_type, stat, errmsg, errmsg_len, tmp, stat2 = NULL_TREE;
 
+      gfc_init_se (&se, NULL);
       gfc_init_se (&argse, NULL);
-      gfc_conv_expr_val (&argse, code->expr1);
-      team_type = gfc_build_addr_expr (ppvoid_type_node, argse.expr);
+      gfc_init_se (&team_typese, NULL);
+      gfc_start_block (&se.pre);
 
-      return build_call_expr_loc (input_location,
-				  gfor_fndecl_caf_sync_team, 2,
-				  team_type,
-				  build_int_cst (integer_type_node, 0));
+      gfc_conv_expr_val (&team_typese, code->expr1);
+      team_type = gfc_build_addr_expr (ppvoid_type_node, team_typese.expr);
+
+      gfc_add_block_to_block (&se.pre, &team_typese.pre);
+
+      /* STAT=.  */
+      if (code->expr2)
+	{
+	  gcc_assert (code->expr2->expr_type == EXPR_VARIABLE);
+	  gfc_init_se (&argse, NULL);
+	  gfc_conv_expr_val (&argse, code->expr2);
+	  stat = argse.expr;
+	}
+      else
+	stat = null_pointer_node;
+
+      /* ERRMSG= only makes sense with STAT=.  */
+      if (code->expr2 && code->expr3)
+	{
+	  gfc_init_se (&argse, NULL);
+	  argse.want_pointer = 1;
+	  gfc_conv_expr (&argse, code->expr3);
+	  gfc_add_block_to_block (&se.pre, &argse.pre);
+	  errmsg = argse.expr;
+	  errmsg_len = fold_convert (size_type_node, argse.string_length);
+	}
+      else
+	{
+	  errmsg = null_pointer_node;
+	  errmsg_len = build_zero_cst (size_type_node);
+	}
+
+      if (stat != null_pointer_node && TREE_TYPE (stat) != integer_type_node)
+	{
+	  stat2 = stat;
+	  stat = gfc_create_var (integer_type_node, "stat");
+	}
+
+      tmp = build_call_expr_loc (input_location,
+				 gfor_fndecl_caf_sync_team, 4, team_type,
+				 stat != null_pointer_node
+				 ? gfc_build_addr_expr (NULL, stat) : stat,
+				 errmsg, errmsg_len);
+      gfc_add_expr_to_block (&se.pre, tmp);
+      gfc_add_block_to_block (&se.pre, &team_typese.post);
+      if (stat2 != NULL_TREE)
+	gfc_add_modify (&se.pre, stat2,
+			fold_convert (TREE_TYPE (stat2), stat));
+      return gfc_finish_block (&se.pre);
     }
   else
     {
@@ -1556,18 +1757,92 @@ gfc_trans_critical (gfc_code *code)
 {
   stmtblock_t block;
   tree tmp, token = NULL_TREE;
+  tree cond, stat = NULL_TREE, errmsg, errmsg_len, stat2 = NULL_TREE;
+  gfc_se argse;
 
   gfc_start_block (&block);
 
   if (flag_coarray == GFC_FCOARRAY_LIB)
     {
+      /* STAT=.  */
+      if (code->expr1)
+	{
+	  gcc_assert (code->expr1->expr_type == EXPR_VARIABLE);
+	  gfc_init_se (&argse, NULL);
+	  gfc_conv_expr_val (&argse, code->expr1);
+	  stat = argse.expr;
+	}
+      else
+	stat = null_pointer_node;
+
+      /* ERRMSG= only makes sense with STAT=.  */
+      if (code->expr1 && code->expr2)
+	{
+	  gfc_init_se (&argse, NULL);
+	  argse.want_pointer = 1;
+	  gfc_conv_expr (&argse, code->expr2);
+	  gfc_add_block_to_block (&block, &argse.pre);
+	  errmsg = argse.expr;
+	  errmsg_len = fold_convert (size_type_node, argse.string_length);
+	}
+      else
+	{
+	  errmsg = null_pointer_node;
+	  errmsg_len = build_zero_cst (size_type_node);
+	}
+
+      if (stat != null_pointer_node && TREE_TYPE (stat) != integer_type_node)
+	{
+	  stat2 = stat;
+	  stat = gfc_create_var (integer_type_node, "stat");
+	}
+
       token = gfc_get_symbol_decl (code->resolved_sym);
       token = GFC_TYPE_ARRAY_CAF_TOKEN (TREE_TYPE (token));
       tmp = build_call_expr_loc (input_location, gfor_fndecl_caf_lock, 7,
 				 token, integer_zero_node, integer_one_node,
-				 null_pointer_node, null_pointer_node,
-				 null_pointer_node, integer_zero_node);
+				 null_pointer_node,
+				 stat != null_pointer_node
+				 ? gfc_build_addr_expr (NULL, stat) : stat,
+				 errmsg, errmsg_len);
       gfc_add_expr_to_block (&block, tmp);
+
+      if (stat != null_pointer_node)
+      {
+	/* If stat is set to one of STAT_UNLOCKED_FAILED_IMAGE or
+	 * STAT_FAILED_IMAGE, set its value to the other.
+	 */
+	 /* (stat == STAT_FAILED_IMAGE) */
+	cond = fold_build2_loc (input_location, EQ_EXPR, logical_type_node,
+				stat, build_int_cst (integer_type_node,
+						     GFC_STAT_FAILED_IMAGE));
+	/* (((stat == STAT_FAILED_IMAGE) ? STAT_UNLOCKED_FAILED_IMAGE : stat) */
+	tmp = fold_build3_loc (input_location, COND_EXPR, integer_type_node,
+			       cond, build_int_cst (integer_type_node,
+					      GFC_STAT_UNLOCKED_FAILED_IMAGE),
+			       stat);
+	/* (stat == STAT_UNLOCKED_FAILED_IMAGE) */
+	cond = fold_build2_loc (input_location, EQ_EXPR, logical_type_node,
+				stat, build_int_cst (integer_type_node,
+					     GFC_STAT_UNLOCKED_FAILED_IMAGE));
+	/* (stat == STAT_UNLOCKED_FAILED_IMAGE) ? STAT_FAILED_IMAGE :
+	 *  ((stat == STAT_FAILED_IMAGE) ? STAT_UNLOCKED_FAILED_IMAGE : stat)
+	 */
+	tmp = fold_build3_loc (input_location, COND_EXPR, integer_type_node,
+			       cond, build_int_cst (integer_type_node,
+						    GFC_STAT_FAILED_IMAGE),
+			       tmp);
+
+	/* assign result to stat.  */
+	gfc_add_modify (&block, stat,
+			fold_convert (TREE_TYPE (stat), tmp));
+
+	gfc_add_expr_to_block (&block, tmp);
+
+	if (stat2 != NULL_TREE)
+	  gfc_add_modify (&block, stat2,
+			  fold_convert (TREE_TYPE (stat2), stat));
+      }
 
       /* It guarantees memory consistency within the same segment */
       tmp = gfc_build_string_const (strlen ("memory")+1, "memory"),
@@ -1586,10 +1861,18 @@ gfc_trans_critical (gfc_code *code)
 
   if (flag_coarray == GFC_FCOARRAY_LIB)
     {
+      /* END CRITICAL does not accept STAT or ERRMSG arguments.
+       * If STAT= is specified for CRITICAL, pass a stat argument to
+       * _gfortran_caf_lock_unlock to prevent termination in the event of an
+       * error, but ignore any value assigned to it.
+       */
       tmp = build_call_expr_loc (input_location, gfor_fndecl_caf_unlock, 6,
 				 token, integer_zero_node, integer_one_node,
-				 null_pointer_node, null_pointer_node,
-				 integer_zero_node);
+				 stat != NULL_TREE
+				 ? gfc_build_addr_expr (NULL,
+				    gfc_create_var (integer_type_node, "stat"))
+				 : null_pointer_node,
+				 null_pointer_node, integer_zero_node);
       gfc_add_expr_to_block (&block, tmp);
 
       /* It guarantees memory consistency within the same segment */

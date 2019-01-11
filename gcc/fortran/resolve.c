@@ -9487,6 +9487,89 @@ resolve_lock_unlock_event (gfc_code *code)
     }
 }
 
+static void
+resolve_form_team (gfc_code *code)
+{
+  if (code->expr2->ts.type != BT_DERIVED
+	  || code->expr2->expr_type != EXPR_VARIABLE
+	  || code->expr2->ts.u.derived->from_intmod != INTMOD_ISO_FORTRAN_ENV
+	  || code->expr2->ts.u.derived->intmod_sym_id != ISOFORTRAN_TEAM_TYPE
+	  || code->expr2->rank != 0)
+    gfc_error ("Team variable at %L must be a scalar of type TEAM_TYPE",
+	       &code->expr2->where);
+
+  /* Check NEW_INDEX.  */
+  if (code->expr3)
+    {
+      if (!gfc_resolve_expr (code->expr3) || code->expr3->ts.type != BT_INTEGER
+	  || code->expr3->rank != 0)
+	gfc_error ("NEW_INDEX= argument at %L must be a scalar INTEGER "
+		   "expression", &code->expr3->where);
+    }
+
+  /* Check STAT.  */
+  gfc_resolve_expr (code->expr4);
+  if (code->expr4
+      && (code->expr4->ts.type != BT_INTEGER || code->expr4->rank != 0
+	  || code->expr4->expr_type != EXPR_VARIABLE))
+    gfc_error ("STAT= argument at %L must be a scalar INTEGER variable",
+	       &code->expr4->where);
+
+  /* Check ERRMSG.  */
+  gfc_resolve_expr (code->expr5);
+  if (code->expr5
+      && (code->expr5->ts.type != BT_CHARACTER || code->expr5->rank != 0
+	  || code->expr5->expr_type != EXPR_VARIABLE))
+    gfc_error ("ERRMSG= argument at %L must be a scalar CHARACTER variable",
+	       &code->expr5->where);
+}
+
+static void
+resolve_change_sync_team (gfc_code *code)
+{
+  if (code->expr1->ts.type != BT_DERIVED
+	  || code->expr1->ts.u.derived->from_intmod != INTMOD_ISO_FORTRAN_ENV
+	  || code->expr1->ts.u.derived->intmod_sym_id != ISOFORTRAN_TEAM_TYPE
+	  || code->expr1->rank != 0)
+    gfc_error ("team-value argument at %L must be a scalar TEAM_TYPE expression",
+	       &code->expr1->where);
+
+  /* Check STAT.  */
+  gfc_resolve_expr (code->expr2);
+  if (code->expr2
+      && (code->expr2->ts.type != BT_INTEGER || code->expr2->rank != 0
+	  || code->expr2->expr_type != EXPR_VARIABLE))
+    gfc_error ("STAT= argument at %L must be a scalar INTEGER variable",
+	       &code->expr2->where);
+
+  /* Check ERRMSG.  */
+  gfc_resolve_expr (code->expr3);
+  if (code->expr3
+      && (code->expr3->ts.type != BT_CHARACTER || code->expr3->rank != 0
+	  || code->expr3->expr_type != EXPR_VARIABLE))
+    gfc_error ("ERRMSG= argument at %L must be a scalar CHARACTER variable",
+	       &code->expr3->where);
+}
+
+static void
+resolve_end_team (gfc_code *code)
+{
+  /* Check STAT.  */
+  gfc_resolve_expr (code->expr1);
+  if (code->expr1
+      && (code->expr1->ts.type != BT_INTEGER || code->expr1->rank != 0
+	  || code->expr1->expr_type != EXPR_VARIABLE))
+    gfc_error ("STAT= argument at %L must be a scalar INTEGER variable",
+	       &code->expr1->where);
+
+  /* Check ERRMSG.  */
+  gfc_resolve_expr (code->expr2);
+  if (code->expr2
+      && (code->expr2->ts.type != BT_CHARACTER || code->expr2->rank != 0
+	  || code->expr2->expr_type != EXPR_VARIABLE))
+    gfc_error ("ERRMSG= argument at %L must be a scalar CHARACTER variable",
+	       &code->expr2->where);
+}
 
 static void
 resolve_critical (gfc_code *code)
@@ -9495,6 +9578,22 @@ resolve_critical (gfc_code *code)
   gfc_symbol *lock_type;
   char name[GFC_MAX_SYMBOL_LEN];
   static int serial = 0;
+
+  /* Check STAT.  */
+  gfc_resolve_expr (code->expr1);
+  if (code->expr1
+      && (code->expr1->ts.type != BT_INTEGER || code->expr1->rank != 0
+	  || code->expr1->expr_type != EXPR_VARIABLE))
+    gfc_error ("STAT= argument at %L must be a scalar INTEGER variable",
+	       &code->expr1->where);
+
+  /* Check ERRMSG.  */
+  gfc_resolve_expr (code->expr2);
+  if (code->expr2
+      && (code->expr2->ts.type != BT_CHARACTER || code->expr2->rank != 0
+	  || code->expr2->expr_type != EXPR_VARIABLE))
+    gfc_error ("ERRMSG= argument at %L must be a scalar CHARACTER variable",
+	       &code->expr2->where);
 
   if (flag_coarray != GFC_FCOARRAY_LIB)
     return;
@@ -11185,10 +11284,18 @@ start:
 	  break;
 
 	case EXEC_FAIL_IMAGE:
+      break;
 	case EXEC_FORM_TEAM:
+      resolve_form_team (code);
+      break;
+
 	case EXEC_CHANGE_TEAM:
-	case EXEC_END_TEAM:
 	case EXEC_SYNC_TEAM:
+      resolve_change_sync_team (code);
+      break;
+
+	case EXEC_END_TEAM:
+      resolve_end_team (code);
 	  break;
 
 	case EXEC_ENTRY:
